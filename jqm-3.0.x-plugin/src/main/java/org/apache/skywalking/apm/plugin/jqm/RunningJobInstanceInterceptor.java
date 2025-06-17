@@ -24,6 +24,10 @@ import org.apache.skywalking.apm.agent.core.context.trace.AbstractSpan;
 import org.apache.skywalking.apm.agent.core.plugin.interceptor.enhance.EnhancedInstance;
 import org.apache.skywalking.apm.agent.core.plugin.interceptor.enhance.v2.InstanceMethodsAroundInterceptorV2;
 import org.apache.skywalking.apm.agent.core.plugin.interceptor.enhance.v2.MethodInvocationContext;
+import org.apache.skywalking.apm.dependencies.org.slf4j.LoggerFactory;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import java.lang.reflect.Field;
 
 /**
  * {@link JDBCPrepareStatementWithStringArrayInterceptor} return {@link SWPreparedStatement} instance that wrapper the
@@ -40,8 +44,25 @@ public class RunningJobInstanceInterceptor implements InstanceMethodsAroundInter
                              Object[] allArguments,
                             Class<?>[] argumentsTypes,
                             MethodInvocationContext context) throws Throwable {
-                                ContextManager.createEntrySpan("Jqm/RunJob", null);
-                                ContextManager.activeSpan();
+
+        Logger logger = LoggerFactory.getLogger(RunningJobInstanceInterceptor.class);
+        
+        try {
+            Class<?> metadata = objInst.getClass();
+            Field attribute = metadata.getDeclaredField("ji");
+            attribute.setAccessible(true);
+            
+            Object jiObject = attribute.get(objInst);
+            Class<?> metadataJob = jiObject.getClass();
+            Field id = metadataJob.getDeclaredField("id");
+            id.setAccessible(true);
+
+            long valueId = id.getLong(jiObject);
+            ContextManager.createEntrySpan("" + valueId, null);
+            ContextManager.activeSpan();
+        } catch (Exception e) {
+            logger.error("Erreur dans l'interception de l'instance", e);
+        }
     }
 
     @Override
