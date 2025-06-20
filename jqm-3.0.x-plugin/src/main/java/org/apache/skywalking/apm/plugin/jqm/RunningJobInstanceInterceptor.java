@@ -1,52 +1,32 @@
-/*
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.
- * The ASF licenses this file to You under the Apache License, Version 2.0
- * (the "License"); you may not use this file except in compliance with
- * the License.  You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- *
- */
-
 package org.apache.skywalking.apm.plugin.jqm;
 
+import java.lang.reflect.Field;
 import java.lang.reflect.Method;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+
 import org.apache.skywalking.apm.agent.core.context.ContextManager;
 import org.apache.skywalking.apm.agent.core.context.trace.AbstractSpan;
+import org.apache.skywalking.apm.agent.core.context.ContextSnapshot;
 import org.apache.skywalking.apm.agent.core.plugin.interceptor.enhance.EnhancedInstance;
 import org.apache.skywalking.apm.agent.core.plugin.interceptor.enhance.v2.InstanceMethodsAroundInterceptorV2;
 import org.apache.skywalking.apm.agent.core.plugin.interceptor.enhance.v2.MethodInvocationContext;
-import org.apache.skywalking.apm.dependencies.org.slf4j.LoggerFactory;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import java.lang.reflect.Field;
 
-/**
- * {@link JDBCPrepareStatementWithStringArrayInterceptor} return {@link SWPreparedStatement} instance that wrapper the
- * real preparedStatement instance when the client call <code>org.postgresql.jdbc.PgConnection#prepareStatement(String,
- * String[]) </code> method. method.
- */
-
-/**/
 public class RunningJobInstanceInterceptor implements InstanceMethodsAroundInterceptorV2 {
+
+    private static final Map<String, ContextSnapshot> CONTEXT_SNAPSHOTS = new ConcurrentHashMap<>();
 
     @Override
     public void beforeMethod(EnhancedInstance objInst,
                              Method method,
                              Object[] allArguments,
-                            Class<?>[] argumentsTypes,
-                            MethodInvocationContext context) throws Throwable {
-
-        Logger logger = LoggerFactory.getLogger(RunningJobInstanceInterceptor.class);
+                             Class<?>[] argumentsTypes,
+                             MethodInvocationContext context) {
         
+        Logger logger = LoggerFactory.getLogger(RunningJobInstanceInterceptor.class);
+
         try {
             Class<?> metadata = objInst.getClass();
             Field attribute = metadata.getDeclaredField("ji");
@@ -54,24 +34,45 @@ public class RunningJobInstanceInterceptor implements InstanceMethodsAroundInter
             
             Object jiObject = attribute.get(objInst);
             Class<?> metadataJob = jiObject.getClass();
+
             Field id = metadataJob.getDeclaredField("id");
             id.setAccessible(true);
+            long jobId = id.getLong(jiObject);
 
-            long valueId = id.getLong(jiObject);
-            ContextManager.createEntrySpan("" + valueId, null);
-            ContextManager.activeSpan();
+            Field sessionIdField = jiObject.getClass().getDeclaredField("sessionID");
+            sessionIdField.setAccessible(true);
+            String sessionId = String.valueOf(sessionIdField.get(jiObject));
+
+            AbstractSpan span;
+
+            if (sessionId != null && !sessionId.isEmpty()) {
+                //si session ID 
+                ContextSnapshot snapshot = CONTEXT_SNAPSHOTS.get(sessionId);
+                if (snapshot == null) {
+                    //si tête
+                    span = ContextManager.createLocalSpan("Head:" + jobId);
+                    CONTEXT_SNAPSHOTS.put(sessionId, ContextManager.capture());
+                } else {
+                    //sinon
+                    span = ContextManager.createLocalSpan("Next:" + jobId);
+                    ContextManager.continued(snapshot);
+                }
+            } else {
+                //Si pas de sessionID
+                span = ContextManager.createLocalSpan("" + jobId);
+            }
         } catch (Exception e) {
-            logger.error("Erreur dans l'interception de l'instance", e);
+            logger.error("Erreur dans RunningJobInstanceInterceptor", e);
         }
     }
 
     @Override
     public Object afterMethod(EnhancedInstance objInst,
-                               Method method,
-                               Object[] allArguments,
-                               Class<?>[] argumentsTypes,
-                               Object ret,
-                                MethodInvocationContext context) throws Throwable {
+                              Method method,
+                              Object[] allArguments,
+                              Class<?>[] argumentsTypes,
+                              Object ret,
+                              MethodInvocationContext context) throws Throwable {
         ContextManager.stopSpan();
         return ret;
     }
