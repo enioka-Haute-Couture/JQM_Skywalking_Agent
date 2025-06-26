@@ -15,7 +15,7 @@
   ~ limitations under the License.
   ~
   -->
-
+  
 <project xmlns="http://maven.apache.org/POM/4.0.0" 
          xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" 
          xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 
@@ -38,25 +38,6 @@
         <jqm.version>3.0.0</jqm.version>
         <maven-shade-plugin.version>3.4.1</maven-shade-plugin.version>
     </properties>
-
-    <dependencies>
-        <dependency>
-            <groupId>jakarta.ws.rs</groupId>
-            <artifactId>jakarta.ws.rs-api</artifactId>
-            <version>3.1.0</version>
-            <scope>provided</scope>
-        </dependency>
-        <dependency>
-            <groupId>org.glassfish.jersey.core</groupId>
-            <artifactId>jersey-client</artifactId>
-            <version>3.1.2</version>
-        </dependency>
-        <dependency>
-            <groupId>org.glassfish.jersey.inject</groupId>
-            <artifactId>jersey-hk2</artifactId>
-            <version>3.1.2</version>
-        </dependency>
-    </dependencies>
 
     <build>
         <resources>
@@ -83,9 +64,6 @@
                         </goals>
                         <configuration>
                             <artifactSet>
-                                <excludes>
-                                    <exclude>jakarta.ws.rs:jakarta.ws.rs-api</exclude>
-                                </excludes>
                             </artifactSet>
                             <createDependencyReducedPom>true</createDependencyReducedPom>
                         </configuration>
@@ -95,4 +73,3 @@
         </plugins>
     </build>
 </project>
-

@@ -1,43 +1,41 @@
-package org.apache.skywalking.apm.plugin.jqm;
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.
+ * The ASF licenses this file to You under the Apache License, Version 2.0
+ * (the "License"); you may not use this file except in compliance with
+ * the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ *
+ */
 
-import java.io.BufferedInputStream;
-import java.io.BufferedReader;
-import java.io.ByteArrayInputStream;
-import java.io.FileInputStream;
-import java.io.FileNotFoundException;
-import java.io.IOException;
-import java.io.InputStream;
-import java.io.InputStreamReader;
+ package org.apache.skywalking.apm.plugin.jqm;
+
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
-import java.security.KeyStore;
-import java.security.KeyStoreException;
-import java.util.ArrayList;
 import java.util.HashMap;
-import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.Properties;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.nio.file.Files;
 
 import org.apache.skywalking.apm.agent.core.context.ContextManager;
 import org.apache.skywalking.apm.agent.core.context.trace.AbstractSpan;
 import org.apache.skywalking.apm.agent.core.context.ContextSnapshot;
-import org.apache.skywalking.apm.agent.core.context.CorrelationContext;
-import org.apache.skywalking.apm.agent.core.context.ExtensionContext;
-import org.apache.skywalking.apm.agent.core.context.ids.DistributedTraceId;
 import org.apache.skywalking.apm.agent.core.context.tag.Tags;
 import org.apache.skywalking.apm.agent.core.plugin.interceptor.enhance.EnhancedInstance;
 import org.apache.skywalking.apm.agent.core.plugin.interceptor.enhance.v2.InstanceMethodsAroundInterceptorV2;
 import org.apache.skywalking.apm.agent.core.plugin.interceptor.enhance.v2.MethodInvocationContext;
-import org.apache.skywalking.apm.agent.core.profile.ProfileStatusContext;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import jakarta.ws.rs.client.WebTarget;
-import jakarta.ws.rs.core.GenericType;
-import jakarta.ws.rs.client.Client;
-import jakarta.ws.rs.client.ClientBuilder;
-import jakarta.ws.rs.core.MediaType;
-
 
 public class RunningJobInstanceInterceptor implements InstanceMethodsAroundInterceptorV2 {
 
@@ -53,9 +51,6 @@ public class RunningJobInstanceInterceptor implements InstanceMethodsAroundInter
 
     private static final Map<String, ContextSnapshot> CONTEXT_SNAPSHOTS = new ConcurrentHashMap<>();
     private Logger logger = LoggerFactory.getLogger(RunningJobInstanceInterceptor.class);
-    private Properties p =  new Properties();
-    private WebTarget target;
-    private Client client;
 
     @Override
     public void beforeMethod(EnhancedInstance objInst,
@@ -74,7 +69,7 @@ public class RunningJobInstanceInterceptor implements InstanceMethodsAroundInter
             String applicationName = getFieldValue(jd.object, "applicationName");
 
             AbstractSpan span = ContextManager.createLocalSpan(applicationName + " " + jobId);
-            if (CONTEXT_SNAPSHOTS.get(parentId) != null && ContextManager.isActive()){
+            if (CONTEXT_SNAPSHOTS.get(parentId) != null && ContextManager.isActive()) {
                 ContextManager.continued(CONTEXT_SNAPSHOTS.get(parentId));
             }
             CONTEXT_SNAPSHOTS.put(jobId, ContextManager.capture());
@@ -92,7 +87,7 @@ public class RunningJobInstanceInterceptor implements InstanceMethodsAroundInter
                               MethodInvocationContext context) {
         try {
             //get all the objects we need
-            Class<?> RunningJobInstanceClass = objInst.getClass();
+            Class<?> runningJobInstanceClass = objInst.getClass();
 
             FieldInfo ji = getClassAndObject(objInst, "ji");
             FieldInfo jd = getClassAndObject(ji.object, "jd");
@@ -100,10 +95,10 @@ public class RunningJobInstanceInterceptor implements InstanceMethodsAroundInter
             FieldInfo node = getClassAndObject(ji.object, "q");
 
             //case for a enum
-            Field resultStatusField = RunningJobInstanceClass.getDeclaredField("resultStatus");
+            Field resultStatusField = runningJobInstanceClass.getDeclaredField("resultStatus");
             resultStatusField.setAccessible(true);
             Object resultStatusObject = resultStatusField.get(objInst);
-            String QueueStatus = resultStatusObject != null ? resultStatusObject.toString() : null;
+            String queueStatus = resultStatusObject != null ? resultStatusObject.toString() : null;
 
             Field applicationName = jd.clazz.getDeclaredField("applicationName");
             applicationName.setAccessible(true);
@@ -118,7 +113,7 @@ public class RunningJobInstanceInterceptor implements InstanceMethodsAroundInter
             span.tag(Tags.ofKey("Priority"), getFieldValue(ji.object, "priority"));
             span.tag(Tags.ofKey("Parent"), getFieldValue(ji.object, "parentId"));
             span.tag(Tags.ofKey("Session id"), getFieldValue(ji.object, "sessionID"));
-            span.tag(Tags.ofKey("Queue"), QueueStatus);
+            span.tag(Tags.ofKey("Queue"), queueStatus);
             span.tag(Tags.ofKey("Progress"), getFieldValue(ji.object, "progress"));
             span.tag(Tags.ofKey("User"), getFieldValue(ji.object, "userName"));
             span.tag(Tags.ofKey("User Email"), getFieldValue(ji.object, "email"));
@@ -141,23 +136,22 @@ public class RunningJobInstanceInterceptor implements InstanceMethodsAroundInter
             for (String i : param.keySet()) {
             span.tag(Tags.ofKey("Param" + tmp++), "name: " + i + " value: " + param.get(i));
             }
+
+            Field field = ji.object.getClass().getDeclaredField("id");
+            field.setAccessible(true);
+            Long id = (Long) field.get(ji.object);
+
+            Map<String, String> infoMap = new HashMap<>();
+                infoMap.put("info", log(id, "stdout"));
+                span.log(System.currentTimeMillis(), infoMap);
+
+            String error = log(id, "stderr");
+            if (error.length() >= 1) {
+                Throwable errorTgThrowable = new Throwable(error);
+                span.log(errorTgThrowable);
+            }
                 //TODO schedule 
 
-            JerseyClient(p);
-
-            /*List<Object> jobDefs = this.target
-                .path("jd")
-                .request(MediaType.APPLICATION_JSON)
-                .get(new GenericType<List<Object>>() {});
-            for (Object jobDef:jobDefs) {
-                logger.info("" + jobDef);
-            }*/
-
-            InputStream log = target.path("ji/" + getFieldValue(ji.object, "id") + "/stdout").request().get(InputStream.class);
-            addLogStdOut(log);
-            
-            log = target.path("ji/" + getFieldValue(ji.object, "id") + "/stderr").request().get(InputStream.class);
-            addLogStdErr(log);
         } catch (Exception e) {
             logger.error("Erreur dans RunningJobInstanceInterceptor", e);
         }
@@ -194,7 +188,6 @@ public class RunningJobInstanceInterceptor implements InstanceMethodsAroundInter
                 logger.warn("Objet ou nom de champ nul");
                 return null;
             }
-
             try {
                 Field field = fieldObject.getClass().getDeclaredField(fieldName);
                 field.setAccessible(true);
@@ -223,216 +216,17 @@ public class RunningJobInstanceInterceptor implements InstanceMethodsAroundInter
         }
     }
 
-    //Copy of the JerseyClient Class of JQM in order to be able to call the back and get the logs 
-    public void JerseyClient(Properties p)
-    {
-        logger.trace("creating a new WS client");
-
-        ///////////////////////////////////////
-        // Property loading
-
-        // Properties priority is: Given explicitly > Given as sys param > Given inside conf file.
-        // They are therefore loaded in that reverse order.
-        this.p = new Properties();
-
-        // Configuration file
-        InputStream fis = null;
-        try
-        {
-            fis = this.getClass().getClassLoader().getResourceAsStream("jqm.properties");
-            if (fis != null)
-            {
-                logger.info("Loading jqm properties file");
-                this.p.load(fis);
-            }
-            else
-            {
-                logger.info("No jqm properties file for WS client found in class path");
-            }
+    public String log(Long id, String logtype) {
+        try {
+            String file = String.format("%010d", id) + "." + logtype + ".log";
+            Path path = Paths.get(System.getProperty("user.home"),
+                            "jqm", "jqm-all", "jqm-service", "target",
+                            "jqm-3.0.1-SNAPSHOT", "jqm-3.0.1-SNAPSHOT",
+                                   "logs", file);
+            return Files.readString(path);
+        } catch (Exception e) {
+            return null;
         }
-        catch (Exception e)
-        {
-           logger.error("Erreur dans RunningJobInstanceInterceptor", e);
-        }
-        finally
-        {
-            try
-            {
-                fis.close();
-            }
-            catch (Exception e)
-            {
-                // Ignore.
-            }
-        }
-
-        // System parameter (only for URL, not documented nor supported by the way)
-        if (System.getProperty("com.enioka.jqm.ws.url") != null)
-        {
-            this.p.setProperty("com.enioka.jqm.ws.url", System.getProperty("com.enioka.jqm.ws.url"));
-        }
-
-        // Given explicitly
-        this.p.putAll(p);
-
-        // JAX-RS client builder comes from service loader (directly used by the jax-rs API)
-        ClientBuilder bld = ClientBuilder.newBuilder();
-        logger.info("Using JAX-RS client builder from service loader");
-
-        ///////////////////////////////////////
-        // SSL certificates
-        if (this.p.containsKey("com.enioka.jqm.ws.truststoreFile"))
-        {
-            logger.info("A trustore was specified and will be loaded");
-            KeyStore trust = null;
-            InputStream trustIs = null;
-
-            try
-            {
-                trust = KeyStore.getInstance(this.p.getProperty("com.enioka.jqm.ws.truststoreType", "JKS"));
-            }
-            catch (KeyStoreException e)
-            {
-                logger.error("Erreur dans RunningJobInstanceInterceptor", e);
-            }
-
-            try
-            {
-                trustIs = new FileInputStream(this.p.getProperty("com.enioka.jqm.ws.truststoreFile"));
-            }
-            catch (FileNotFoundException e)
-            {
-                logger.error("Erreur dans RunningJobInstanceInterceptor", e);
-            }
-
-            String trustp = this.p.getProperty("com.enioka.jqm.ws.truststorePass", null);
-            try
-            {
-                trust.load(trustIs, (trustp == null ? null : trustp.toCharArray()));
-            }
-            catch (Exception e)
-            {
-                logger.error("Erreur dans RunningJobInstanceInterceptor", e);
-            }
-            finally
-            {
-                try
-                {
-                    trustIs.close();
-                }
-                catch (IOException e)
-                {
-                    // Nothing to do.
-                }
-            }
-
-            bld.trustStore(trust);
-
-            // Client certificate
-            if (this.p.containsKey("com.enioka.jqm.ws.keystoreFile"))
-            {
-                logger.info("A keystore was specified and will be loaded");
-                KeyStore keyStore = null;
-                InputStream keyIs = null;
-
-                try
-                {
-                    keyStore = KeyStore.getInstance(this.p.getProperty("com.enioka.jqm.ws.keystoreType", "JKS"));
-                }
-                catch (KeyStoreException e)
-                {
-                    logger.error("Erreur dans RunningJobInstanceInterceptor", e);
-                }
-
-                try
-                {
-                    keyIs = new FileInputStream(this.p.getProperty("com.enioka.jqm.ws.keystoreFile"));
-                }
-                catch (FileNotFoundException e)
-                {
-                    logger.error("Erreur dans RunningJobInstanceInterceptor", e);
-                }
-
-                String keyp = this.p.getProperty("com.enioka.jqm.ws.keystorePass", null);
-                try
-                {
-                    keyStore.load(keyIs, (keyp == null ? null : keyp.toCharArray()));
-                }
-                catch (Exception e)
-                {
-                    logger.error("Erreur dans RunningJobInstanceInterceptor", e);
-                }
-                finally
-                {
-                    try
-                    {
-                        keyIs.close();
-                    }
-                    catch (IOException e)
-                    {
-                        // Nothing to do.
-                    }
-                }
-
-                bld.keyStore(keyStore, keyp);
-            }
-
-            client = bld.build();
-        }
-        else
-        {
-            // No trust store given = no SSL allowed => default client
-            client = bld.build();
-        }
-        ///////////////////////////////////////
-        // Create client
-
-        //Modification here on the Port value to put the proxy
-        String url = this.p.getProperty("com.enioka.jqm.ws.url", "http://localhost:32885/ws/client");
-        //End of modification
-
-        logger.info("JAX-RS client was created. The following root service URL will be used: " + url);
-        this.target = client.target(url);
-    }
-
-    public static void addLogStdOut(InputStream inputStream) throws IOException {
-        AbstractSpan span = ContextManager.activeSpan();
-        BufferedInputStream buffered = new BufferedInputStream(inputStream);
-        buffered.mark(8192);
-
-        int b = buffered.read();
-        if (b != -1) {
-            buffered.reset();
-            try (BufferedReader reader = new BufferedReader(new InputStreamReader(buffered))) {
-                StringBuilder exit = new StringBuilder();
-                String line;
-                while ((line = reader.readLine()) != null) {
-                    exit.append(line).append("\n");
-                }
-                Map<String, String> infoMap = new HashMap<>();
-                infoMap.put("info", exit.toString());
-                span.log(System.currentTimeMillis(), infoMap);
-            }
-        }
-    }
-
-    public static void addLogStdErr(InputStream inputStream) throws IOException {
-        AbstractSpan span = ContextManager.activeSpan();
-        BufferedInputStream buffered = new BufferedInputStream(inputStream);
-        buffered.mark(8192);
-
-        int b = buffered.read();
-        if (b != -1) {
-            buffered.reset();
-            try (BufferedReader reader = new BufferedReader(new InputStreamReader(buffered))) {
-                StringBuilder exit = new StringBuilder();
-                String line;
-                while ((line = reader.readLine()) != null) {
-                    exit.append(line).append("\n");
-                }
-                Throwable error = new Throwable(exit.toString());
-                span.log(error);
-            }
-        }
+        
     }
 }
