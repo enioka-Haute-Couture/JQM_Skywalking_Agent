@@ -36,6 +36,7 @@ import jakarta.ws.rs.client.WebTarget;
 import jakarta.ws.rs.core.GenericType;
 import jakarta.ws.rs.client.Client;
 import jakarta.ws.rs.client.ClientBuilder;
+import jakarta.ws.rs.core.MediaType;
 
 
 public class RunningJobInstanceInterceptor implements InstanceMethodsAroundInterceptorV2 {
@@ -126,14 +127,30 @@ public class RunningJobInstanceInterceptor implements InstanceMethodsAroundInter
             span.tag(Tags.ofKey("Keyword 3"), getFieldValue(ji.object, "instanceKeyword3"));
             span.tag(Tags.ofKey("Node"), getFieldValue(node.object, "name"));
             span.tag(Tags.ofKey("Queue name"), getFieldValue(queue.object, "name"));
+            span.tag(Tags.ofKey("description"), getFieldValue(jd.object, "description"));
+            span.tag(Tags.ofKey("javaClassName"), getFieldValue(jd.object, "javaClassName"));
+            span.tag(Tags.ofKey("pathType"), getFieldValue(jd.object, "pathType"));
+            span.tag(Tags.ofKey("Queue name"), getFieldValue(jd.object, "jarPath"));
+            span.tag(Tags.ofKey("Queue id"), getFieldValue(jd.object, "queue_id"));
+            span.tag(Tags.ofKey("maxTimeRunning"), getFieldValue(jd.object, "maxTimeRunning"));
+            span.tag(Tags.ofKey("javaOpts"), getFieldValue(jd.object, "javaOpts"));
+            span.tag(Tags.ofKey("classLoader"), getFieldValue(jd.object, "classLoader"));
 
-            //TODO schedule 
+            HashMap<String, String> param = getFieldHashMap(ji.object, "prmCache");
+            Integer tmp = 1;
+            for (String i : param.keySet()) {
+            span.tag(Tags.ofKey("Param" + tmp++), "name: " + i + " value: " + param.get(i));
+            }
+                //TODO schedule 
 
             JerseyClient(p);
 
-            /*List<Object> jobDefs = this.target.path("jd/" + getFieldValue(jd.object, "applicationName")).request().get(new GenericType<List<Object>>() {});
+            /*List<Object> jobDefs = this.target
+                .path("jd")
+                .request(MediaType.APPLICATION_JSON)
+                .get(new GenericType<List<Object>>() {});
             for (Object jobDef:jobDefs) {
-                logger.info("I pass here");
+                logger.info("" + jobDef);
             }*/
 
             InputStream log = target.path("ji/" + getFieldValue(ji.object, "id") + "/stdout").request().get(InputStream.class);
@@ -141,8 +158,6 @@ public class RunningJobInstanceInterceptor implements InstanceMethodsAroundInter
             
             log = target.path("ji/" + getFieldValue(ji.object, "id") + "/stderr").request().get(InputStream.class);
             addLogStdErr(log);
-            logger.info("END OF THE SPAN" + getFieldValue(ji.object, "id"));
-
         } catch (Exception e) {
             logger.error("Erreur dans RunningJobInstanceInterceptor", e);
         }
@@ -174,6 +189,24 @@ public class RunningJobInstanceInterceptor implements InstanceMethodsAroundInter
                 return null;
         }
 
+        public HashMap<String, String> getFieldHashMap(Object fieldObject, String fieldName) {
+            if (fieldObject == null || fieldName == null) {
+                logger.warn("Objet ou nom de champ nul");
+                return null;
+            }
+
+            try {
+                Field field = fieldObject.getClass().getDeclaredField(fieldName);
+                field.setAccessible(true);
+                Object value = field.get(fieldObject);
+                if (value instanceof HashMap<?, ?>) {
+                    return (HashMap<String, String>) value;
+                }
+            } catch (Exception e) {
+                logger.error("", e);
+            }
+            return null;
+        }
 
     public FieldInfo getClassAndObject(Object parent, String fieldName) {
         try {
@@ -355,7 +388,7 @@ public class RunningJobInstanceInterceptor implements InstanceMethodsAroundInter
         // Create client
 
         //Modification here on the Port value to put the proxy
-        String url = this.p.getProperty("com.enioka.jqm.ws.url", "http://localhost:42849/ws/client");
+        String url = this.p.getProperty("com.enioka.jqm.ws.url", "http://localhost:32885/ws/client");
         //End of modification
 
         logger.info("JAX-RS client was created. The following root service URL will be used: " + url);
