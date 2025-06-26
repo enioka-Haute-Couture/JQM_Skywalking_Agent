@@ -12,6 +12,7 @@ import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.security.KeyStore;
 import java.security.KeyStoreException;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -21,10 +22,14 @@ import java.util.Properties;
 import org.apache.skywalking.apm.agent.core.context.ContextManager;
 import org.apache.skywalking.apm.agent.core.context.trace.AbstractSpan;
 import org.apache.skywalking.apm.agent.core.context.ContextSnapshot;
+import org.apache.skywalking.apm.agent.core.context.CorrelationContext;
+import org.apache.skywalking.apm.agent.core.context.ExtensionContext;
+import org.apache.skywalking.apm.agent.core.context.ids.DistributedTraceId;
 import org.apache.skywalking.apm.agent.core.context.tag.Tags;
 import org.apache.skywalking.apm.agent.core.plugin.interceptor.enhance.EnhancedInstance;
 import org.apache.skywalking.apm.agent.core.plugin.interceptor.enhance.v2.InstanceMethodsAroundInterceptorV2;
 import org.apache.skywalking.apm.agent.core.plugin.interceptor.enhance.v2.MethodInvocationContext;
+import org.apache.skywalking.apm.agent.core.profile.ProfileStatusContext;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import jakarta.ws.rs.client.WebTarget;
@@ -34,6 +39,16 @@ import jakarta.ws.rs.client.ClientBuilder;
 
 
 public class RunningJobInstanceInterceptor implements InstanceMethodsAroundInterceptorV2 {
+
+    public class FieldInfo {
+    public Class<?> clazz;
+    public Object object;
+
+        public FieldInfo(Class<?> clazz, Object object) {
+        this.clazz = clazz;
+        this.object = object;
+        }
+    }
 
     private static final Map<String, ContextSnapshot> CONTEXT_SNAPSHOTS = new ConcurrentHashMap<>();
     private Logger logger = LoggerFactory.getLogger(RunningJobInstanceInterceptor.class);
@@ -47,52 +62,21 @@ public class RunningJobInstanceInterceptor implements InstanceMethodsAroundInter
                              Object[] allArguments,
                              Class<?>[] argumentsTypes,
                              MethodInvocationContext context) {
-        
-
         try {
-            Class<?> RunningJobInstanceClass = objInst.getClass();
+            FieldInfo ji = getClassAndObject(objInst, "ji");
+            FieldInfo jd = getClassAndObject(ji.object, "jd");
+            FieldInfo queue = getClassAndObject(ji.object, "q");
 
-            Field ji = RunningJobInstanceClass.getDeclaredField("ji");
-            ji.setAccessible(true);
-            Object jiObject = ji.get(objInst);
-            Class<?> jiClass = jiObject.getClass();
+            String jobId = getFieldValue(ji.object, "id");
+            String sessionId = getFieldValue(ji.object, "sessionID");
+            String parentId = getFieldValue(ji.object, "parentId");
+            String applicationName = getFieldValue(jd.object, "applicationName");
 
-            Field jd = jiClass.getDeclaredField("jd");
-            jd.setAccessible(true);
-            Object jdObject = jd.get(jiObject);
-            Class<?> jdClass = jdObject.getClass();
-
-            Field queue = jiClass.getDeclaredField("q");
-            queue.setAccessible(true);
-            Object queueObject = queue.get(jiObject);
-            Class<?> queueClass = queueObject.getClass();
-
-            String jobId = getFieldValue(jiObject, "id");
-            String sessionId = getFieldValue(jiObject, "sessionID");
-            String applicationName = getFieldValue(jdObject, "applicationName");
-
-            AbstractSpan span;
-
-            if (sessionId != null && !sessionId.isEmpty()) {
-                //si session ID 
-                ContextSnapshot snapshot = CONTEXT_SNAPSHOTS.get(sessionId);
-                if (snapshot == null) {
-                    //si tête
-                    span = ContextManager.createLocalSpan(applicationName + " " + jobId);
-                    CONTEXT_SNAPSHOTS.put(sessionId, ContextManager.capture());
-                    ContextManager.continued(snapshot);
-                } else {
-                    //sinon
-                    span = ContextManager.createLocalSpan(applicationName + " " + jobId);
-                    ContextManager.continued(snapshot);
-                }
-            } else {
-                //Si pas de sessionID
-                span = ContextManager.createLocalSpan(applicationName + " " + jobId);
+            AbstractSpan span = ContextManager.createLocalSpan(applicationName + " " + jobId);
+            if (CONTEXT_SNAPSHOTS.get(parentId) != null && ContextManager.isActive()){
+                ContextManager.continued(CONTEXT_SNAPSHOTS.get(parentId));
             }
-
-            //span.tag(Tags.ofKey("Queue position"), getFieldValue(queueObject, "internalPosition"));
-
+            CONTEXT_SNAPSHOTS.put(jobId, ContextManager.capture());
         } catch (Exception e) {
             logger.error("Erreur dans RunningJobInstanceInterceptor", e);
         }
@@ -109,25 +93,10 @@ public class RunningJobInstanceInterceptor implements InstanceMethodsAroundInter
             //get all the objects we need
             Class<?> RunningJobInstanceClass = objInst.getClass();
 
-            Field ji = RunningJobInstanceClass.getDeclaredField("ji");
-            ji.setAccessible(true);
-            Object jiObject = ji.get(objInst);
-            Class<?> jiClass = jiObject.getClass();
-
-            Field node = jiClass.getDeclaredField("n");
-            node.setAccessible(true);
-            Object nodeObject = node.get(jiObject);
-            Class<?> nodeClass = nodeObject.getClass();
-
-            Field queue = jiClass.getDeclaredField("q");
-            queue.setAccessible(true);
-            Object queueObject = queue.get(jiObject);
-            Class<?> queueClass = queueObject.getClass();
-
-            Field jd = jiClass.getDeclaredField("jd");
-            jd.setAccessible(true);
-            Object jdObject = jd.get(jiObject);
-            Class<?> jdClass = jdObject.getClass();
+            FieldInfo ji = getClassAndObject(objInst, "ji");
+            FieldInfo jd = getClassAndObject(ji.object, "jd");
+            FieldInfo queue = getClassAndObject(ji.object, "q");
+            FieldInfo node = getClassAndObject(ji.object, "q");
 
             //case for a enum
             Field resultStatusField = RunningJobInstanceClass.getDeclaredField("resultStatus");
@@ -135,47 +104,48 @@ public class RunningJobInstanceInterceptor implements InstanceMethodsAroundInter
             Object resultStatusObject = resultStatusField.get(objInst);
             String QueueStatus = resultStatusObject != null ? resultStatusObject.toString() : null;
 
-            Field applicationName = jdClass.getDeclaredField("applicationName");
+            Field applicationName = jd.clazz.getDeclaredField("applicationName");
             applicationName.setAccessible(true);
-            String applicationNameValue = String.valueOf(applicationName.get(jdObject));
+            String applicationNameValue = String.valueOf(applicationName.get(jd.object));
 
             //add Tags
             AbstractSpan span = ContextManager.activeSpan();
-            span.tag(Tags.ofKey("Software"), getFieldValue(jiObject, "instanceApplication"));
-            span.tag(Tags.ofKey("Module"), getFieldValue(jiObject, "instanceModule"));
-            span.tag(Tags.ofKey("Application"), getFieldValue(jdObject, "applicationName"));
-            span.tag(Tags.ofKey("Job id"), getFieldValue(jiObject, "id"));
-            span.tag(Tags.ofKey("Priority"), getFieldValue(jiObject, "priority"));
-            span.tag(Tags.ofKey("Parent"), getFieldValue(jiObject, "parentId"));
-            span.tag(Tags.ofKey("Session id"), getFieldValue(jiObject, "sessionID"));
+            span.tag(Tags.ofKey("Software"), getFieldValue(ji.object, "instanceApplication"));
+            span.tag(Tags.ofKey("Module"), getFieldValue(ji.object, "instanceModule"));
+            span.tag(Tags.ofKey("Application"), getFieldValue(jd.object, "applicationName"));
+            span.tag(Tags.ofKey("Job id"), getFieldValue(ji.object, "id"));
+            span.tag(Tags.ofKey("Priority"), getFieldValue(ji.object, "priority"));
+            span.tag(Tags.ofKey("Parent"), getFieldValue(ji.object, "parentId"));
+            span.tag(Tags.ofKey("Session id"), getFieldValue(ji.object, "sessionID"));
             span.tag(Tags.ofKey("Queue"), QueueStatus);
-            span.tag(Tags.ofKey("Progress"), getFieldValue(jiObject, "progress"));
-            span.tag(Tags.ofKey("User"), getFieldValue(jiObject, "userName"));
-            span.tag(Tags.ofKey("User Email"), getFieldValue(jiObject, "email"));
-            span.tag(Tags.ofKey("Keyword 1"), getFieldValue(jiObject, "instanceKeyword1"));
-            span.tag(Tags.ofKey("Keyword 2"), getFieldValue(jiObject, "instanceKeyword2"));
-            span.tag(Tags.ofKey("Keyword 3"), getFieldValue(jiObject, "instanceKeyword3"));
-            span.tag(Tags.ofKey("Node"), getFieldValue(nodeObject, "name"));
-            span.tag(Tags.ofKey("Queue name"), getFieldValue(queueObject, "name"));
+            span.tag(Tags.ofKey("Progress"), getFieldValue(ji.object, "progress"));
+            span.tag(Tags.ofKey("User"), getFieldValue(ji.object, "userName"));
+            span.tag(Tags.ofKey("User Email"), getFieldValue(ji.object, "email"));
+            span.tag(Tags.ofKey("Keyword 1"), getFieldValue(ji.object, "instanceKeyword1"));
+            span.tag(Tags.ofKey("Keyword 2"), getFieldValue(ji.object, "instanceKeyword2"));
+            span.tag(Tags.ofKey("Keyword 3"), getFieldValue(ji.object, "instanceKeyword3"));
+            span.tag(Tags.ofKey("Node"), getFieldValue(node.object, "name"));
+            span.tag(Tags.ofKey("Queue name"), getFieldValue(queue.object, "name"));
+
             //TODO schedule 
 
             JerseyClient(p);
 
-            /*List<Object> jobDefs = this.target.path("jd/" + getFieldValue(jdObject, "applicationName")).request().get(new GenericType<List<Object>>() {});
+            /*List<Object> jobDefs = this.target.path("jd/" + getFieldValue(jd.object, "applicationName")).request().get(new GenericType<List<Object>>() {});
             for (Object jobDef:jobDefs) {
                 logger.info("I pass here");
             }*/
 
-            InputStream log = target.path("ji/" + getFieldValue(jiObject, "id") + "/stdout").request().get(InputStream.class);
+            InputStream log = target.path("ji/" + getFieldValue(ji.object, "id") + "/stdout").request().get(InputStream.class);
             addLogStdOut(log);
             
-            log = target.path("ji/" + getFieldValue(jiObject, "id") + "/stderr").request().get(InputStream.class);
+            log = target.path("ji/" + getFieldValue(ji.object, "id") + "/stderr").request().get(InputStream.class);
             addLogStdErr(log);
+            logger.info("END OF THE SPAN" + getFieldValue(ji.object, "id"));
 
         } catch (Exception e) {
             logger.error("Erreur dans RunningJobInstanceInterceptor", e);
         }
-
         ContextManager.stopSpan();
         return ret;
     }
@@ -192,18 +162,33 @@ public class RunningJobInstanceInterceptor implements InstanceMethodsAroundInter
         activeSpan.log(t);
     }
 
-public String getFieldValue(Object fieldObject,
-                              String fieldName) {
-            try {
-                Field field = fieldObject.getClass().getDeclaredField(fieldName);
-                field.setAccessible(true);
-                return String.valueOf(field.get(fieldObject));
-            } catch (Exception e) {
-                logger.error("", e);
-            }
-            return null;
-    }
+    public String getFieldValue(Object fieldObject,
+                                String fieldName) {
+                try {
+                    Field field = fieldObject.getClass().getDeclaredField(fieldName);
+                    field.setAccessible(true);
+                    return String.valueOf(field.get(fieldObject));
+                } catch (Exception e) {
+                    logger.error("", e);
+                }
+                return null;
+        }
 
+
+    public FieldInfo getClassAndObject(Object parent, String fieldName) {
+        try {
+            Field field = parent.getClass().getDeclaredField(fieldName);
+            field.setAccessible(true);
+
+            Object object = field.get(parent);
+            Class<?> classInst = (object != null) ? object.getClass() : null;
+
+            return new FieldInfo(classInst, object);
+        } catch (Exception e) {
+            logger.error("Reflection failed", e);
+            return null;
+        }
+    }
 
     //Copy of the JerseyClient Class of JQM in order to be able to call the back and get the logs 
     public void JerseyClient(Properties p)
@@ -417,6 +402,4 @@ public String getFieldValue(Object fieldObject,
             }
         }
     }
-
 }
-
