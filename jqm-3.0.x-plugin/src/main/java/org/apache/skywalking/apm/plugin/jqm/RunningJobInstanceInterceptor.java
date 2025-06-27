@@ -34,8 +34,6 @@ import org.apache.skywalking.apm.agent.core.context.tag.Tags;
 import org.apache.skywalking.apm.agent.core.plugin.interceptor.enhance.EnhancedInstance;
 import org.apache.skywalking.apm.agent.core.plugin.interceptor.enhance.v2.InstanceMethodsAroundInterceptorV2;
 import org.apache.skywalking.apm.agent.core.plugin.interceptor.enhance.v2.MethodInvocationContext;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 public class RunningJobInstanceInterceptor implements InstanceMethodsAroundInterceptorV2 {
 
@@ -50,7 +48,6 @@ public class RunningJobInstanceInterceptor implements InstanceMethodsAroundInter
     }
 
     private static final Map<String, ContextSnapshot> CONTEXT_SNAPSHOTS = new ConcurrentHashMap<>();
-    private Logger logger = LoggerFactory.getLogger(RunningJobInstanceInterceptor.class);
 
     @Override
     public void beforeMethod(EnhancedInstance objInst,
@@ -61,20 +58,18 @@ public class RunningJobInstanceInterceptor implements InstanceMethodsAroundInter
         try {
             FieldInfo ji = getClassAndObject(objInst, "ji");
             FieldInfo jd = getClassAndObject(ji.object, "jd");
-            FieldInfo queue = getClassAndObject(ji.object, "q");
 
             String jobId = getFieldValue(ji.object, "id");
-            String sessionId = getFieldValue(ji.object, "sessionID");
             String parentId = getFieldValue(ji.object, "parentId");
             String applicationName = getFieldValue(jd.object, "applicationName");
 
-            AbstractSpan span = ContextManager.createLocalSpan(applicationName + " " + jobId);
+            ContextManager.createLocalSpan(applicationName + " " + jobId);
             if (CONTEXT_SNAPSHOTS.get(parentId) != null && ContextManager.isActive()) {
                 ContextManager.continued(CONTEXT_SNAPSHOTS.get(parentId));
             }
             CONTEXT_SNAPSHOTS.put(jobId, ContextManager.capture());
         } catch (Exception e) {
-            logger.error("Erreur dans RunningJobInstanceInterceptor", e);
+            dealException(e);
         }
     }
 
@@ -102,7 +97,6 @@ public class RunningJobInstanceInterceptor implements InstanceMethodsAroundInter
 
             Field applicationName = jd.clazz.getDeclaredField("applicationName");
             applicationName.setAccessible(true);
-            String applicationNameValue = String.valueOf(applicationName.get(jd.object));
 
             //add Tags
             AbstractSpan span = ContextManager.activeSpan();
@@ -147,13 +141,12 @@ public class RunningJobInstanceInterceptor implements InstanceMethodsAroundInter
 
             String error = log(id, "stderr");
             if (error.length() >= 1) {
-                Throwable errorTgThrowable = new Throwable(error);
-                span.log(errorTgThrowable);
+                Throwable errorThrowable = new Throwable(error);
+                span.log(errorThrowable);
             }
-                //TODO schedule 
 
         } catch (Exception e) {
-            logger.error("Erreur dans RunningJobInstanceInterceptor", e);
+            dealException(e);
         }
         ContextManager.stopSpan();
         return ret;
@@ -166,42 +159,40 @@ public class RunningJobInstanceInterceptor implements InstanceMethodsAroundInter
                                       Class<?>[] argumentsTypes,
                                       Throwable t,
                                       MethodInvocationContext context) {
-        AbstractSpan activeSpan = ContextManager.activeSpan();
-        activeSpan.errorOccurred();
-        activeSpan.log(t);
+        dealException(t);
     }
 
-    public String getFieldValue(Object fieldObject,
+    private String getFieldValue(Object fieldObject,
                                 String fieldName) {
                 try {
                     Field field = fieldObject.getClass().getDeclaredField(fieldName);
                     field.setAccessible(true);
                     return String.valueOf(field.get(fieldObject));
                 } catch (Exception e) {
-                    logger.error("", e);
+                    dealException(e);
                 }
                 return null;
         }
 
-        public HashMap<String, String> getFieldHashMap(Object fieldObject, String fieldName) {
-            if (fieldObject == null || fieldName == null) {
-                logger.warn("Objet ou nom de champ nul");
-                return null;
-            }
-            try {
-                Field field = fieldObject.getClass().getDeclaredField(fieldName);
-                field.setAccessible(true);
-                Object value = field.get(fieldObject);
-                if (value instanceof HashMap<?, ?>) {
-                    return (HashMap<String, String>) value;
-                }
-            } catch (Exception e) {
-                logger.error("", e);
-            }
+    @SuppressWarnings("unchecked")
+    private HashMap<String, String> getFieldHashMap(Object fieldObject, String fieldName) {
+        if (fieldObject == null || fieldName == null) {
             return null;
         }
+        try {
+            Field field = fieldObject.getClass().getDeclaredField(fieldName);
+            field.setAccessible(true);
+            Object value = field.get(fieldObject);
+            if (value instanceof HashMap<?, ?>) {
+                return (HashMap<String, String>) value;
+            }
+        } catch (Exception e) {
+            dealException(e);
+        }
+        return null;
+    }
 
-    public FieldInfo getClassAndObject(Object parent, String fieldName) {
+    private FieldInfo getClassAndObject(Object parent, String fieldName) {
         try {
             Field field = parent.getClass().getDeclaredField(fieldName);
             field.setAccessible(true);
@@ -211,12 +202,12 @@ public class RunningJobInstanceInterceptor implements InstanceMethodsAroundInter
 
             return new FieldInfo(classInst, object);
         } catch (Exception e) {
-            logger.error("Reflection failed", e);
+            dealException(e);
             return null;
         }
     }
 
-    public String log(Long id, String logtype) {
+    private String log(Long id, String logtype) {
         try {
             String file = String.format("%010d", id) + "." + logtype + ".log";
             Path path = Paths.get(System.getProperty("user.home"),
@@ -227,6 +218,10 @@ public class RunningJobInstanceInterceptor implements InstanceMethodsAroundInter
         } catch (Exception e) {
             return null;
         }
-        
+    }
+
+    private void dealException(Throwable throwable) {
+        AbstractSpan span = ContextManager.activeSpan();
+        span.log(throwable);
     }
 }
