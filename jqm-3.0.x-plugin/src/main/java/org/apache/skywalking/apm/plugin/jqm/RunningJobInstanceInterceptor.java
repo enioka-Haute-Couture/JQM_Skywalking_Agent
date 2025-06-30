@@ -23,17 +23,17 @@ import java.lang.reflect.Method;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
-import java.nio.file.Path;
-import java.nio.file.Paths;
-import java.nio.file.Files;
 
+import org.apache.skywalking.apm.agent.core.context.CarrierItem;
+import org.apache.skywalking.apm.agent.core.context.ContextCarrier;
 import org.apache.skywalking.apm.agent.core.context.ContextManager;
 import org.apache.skywalking.apm.agent.core.context.trace.AbstractSpan;
-import org.apache.skywalking.apm.agent.core.context.ContextSnapshot;
+import org.apache.skywalking.apm.agent.core.context.trace.SpanLayer;
 import org.apache.skywalking.apm.agent.core.context.tag.Tags;
 import org.apache.skywalking.apm.agent.core.plugin.interceptor.enhance.EnhancedInstance;
 import org.apache.skywalking.apm.agent.core.plugin.interceptor.enhance.v2.InstanceMethodsAroundInterceptorV2;
 import org.apache.skywalking.apm.agent.core.plugin.interceptor.enhance.v2.MethodInvocationContext;
+import org.apache.skywalking.apm.network.trace.component.ComponentsDefine;
 
 public class RunningJobInstanceInterceptor implements InstanceMethodsAroundInterceptorV2 {
 
@@ -47,31 +47,57 @@ public class RunningJobInstanceInterceptor implements InstanceMethodsAroundInter
         }
     }
 
-    private static final Map<String, ContextSnapshot> CONTEXT_SNAPSHOTS = new ConcurrentHashMap<>();
+    private static final Map<String, Map<String, String>> contextStore = new ConcurrentHashMap<>();
 
-    @Override
-    public void beforeMethod(EnhancedInstance objInst,
-                             Method method,
-                             Object[] allArguments,
-                             Class<?>[] argumentsTypes,
-                             MethodInvocationContext context) {
-        try {
-            FieldInfo ji = getClassAndObject(objInst, "ji");
-            FieldInfo jd = getClassAndObject(ji.object, "jd");
+@Override
+public void beforeMethod(EnhancedInstance objInst, Method method, Object[] allArguments,
+                         Class<?>[] argumentsTypes, MethodInvocationContext context) {
+    try {
+        FieldInfo ji = getClassAndObject(objInst, "ji");
+        FieldInfo jd = getClassAndObject(ji.object, "jd");
 
-            String jobId = getFieldValue(ji.object, "id");
-            String parentId = getFieldValue(ji.object, "parentId");
-            String applicationName = getFieldValue(jd.object, "applicationName");
+        String jobId = getFieldValue(ji.object, "id");
+        String sessionID = getFieldValue(ji.object, "sessionID");
+        String parentId = getFieldValue(ji.object, "parentId");
+        String applicationName = getFieldValue(jd.object, "applicationName");
+        
 
-            ContextManager.createLocalSpan(applicationName + " " + jobId);
-            if (CONTEXT_SNAPSHOTS.get(parentId) != null && ContextManager.isActive()) {
-                ContextManager.continued(CONTEXT_SNAPSHOTS.get(parentId));
+        ContextCarrier incomingCarrier = new ContextCarrier();
+
+        if (parentId != null && contextStore.containsKey(sessionID)) {
+            //Contexte du parent 
+            Map<String, String> parentContext = contextStore.get(sessionID);
+            CarrierItem next = incomingCarrier.items();
+            while (next.hasNext()) {
+                next = next.next();
+                next.setHeadValue(parentContext.get(next.getHeadKey()));    
             }
-            CONTEXT_SNAPSHOTS.put(jobId, ContextManager.capture());
-        } catch (Exception e) {
-            dealException(e);
+            AbstractSpan entrySpan = ContextManager.createEntrySpan(applicationName + "/" + jobId, incomingCarrier);
+            entrySpan.setComponent(ComponentsDefine.JERSEY);
+            entrySpan.setLayer(SpanLayer.RPC_FRAMEWORK);
+            entrySpan.setOperationName(applicationName + " " + jobId);
         }
+
+        else {
+            //racine
+            ContextManager.createExitSpan(applicationName + "/" + jobId + "/exit", "localhost");
+            ContextCarrier outgoingCarrier = new ContextCarrier();
+            ContextManager.inject(outgoingCarrier);
+            Map<String, String> contextMap = new ConcurrentHashMap<>();
+            CarrierItem next = outgoingCarrier.items();
+            while (next.hasNext()) {
+                next = next.next();
+                contextMap.put(next.getHeadKey(), next.getHeadValue());
+            }
+            contextStore.put(sessionID, contextMap); 
+        }
+
+    } catch (Exception e) {
+        dealException(e);
     }
+}
+
+
 
     @Override
     public Object afterMethod(EnhancedInstance objInst,
@@ -129,20 +155,6 @@ public class RunningJobInstanceInterceptor implements InstanceMethodsAroundInter
             Integer tmp = 1;
             for (String i : param.keySet()) {
             span.tag(Tags.ofKey("Param" + tmp++), "name: " + i + " value: " + param.get(i));
-            }
-
-            Field field = ji.object.getClass().getDeclaredField("id");
-            field.setAccessible(true);
-            Long id = (Long) field.get(ji.object);
-
-            Map<String, String> infoMap = new HashMap<>();
-                infoMap.put("info", log(id, "stdout"));
-                span.log(System.currentTimeMillis(), infoMap);
-
-            String error = log(id, "stderr");
-            if (error.length() >= 1) {
-                Throwable errorThrowable = new Throwable(error);
-                span.log(errorThrowable);
             }
 
         } catch (Exception e) {
@@ -207,21 +219,10 @@ public class RunningJobInstanceInterceptor implements InstanceMethodsAroundInter
         }
     }
 
-    private String log(Long id, String logtype) {
-        try {
-            String file = String.format("%010d", id) + "." + logtype + ".log";
-            Path path = Paths.get(System.getProperty("user.home"),
-                            "jqm", "jqm-all", "jqm-service", "target",
-                            "jqm-3.0.1-SNAPSHOT", "jqm-3.0.1-SNAPSHOT",
-                                   "logs", file);
-            return Files.readString(path);
-        } catch (Exception e) {
-            return null;
-        }
-    }
-
     private void dealException(Throwable throwable) {
         AbstractSpan span = ContextManager.activeSpan();
         span.log(throwable);
+        ContextManager.stopSpan(span);
     }
+
 }
