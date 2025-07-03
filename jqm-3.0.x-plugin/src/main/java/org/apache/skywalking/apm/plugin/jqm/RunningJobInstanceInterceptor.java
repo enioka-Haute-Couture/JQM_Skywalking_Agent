@@ -17,12 +17,12 @@
  */
 
  package org.apache.skywalking.apm.plugin.jqm;
-
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
+import java.util.Arrays;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
 
 import org.apache.skywalking.apm.agent.core.context.CarrierItem;
 import org.apache.skywalking.apm.agent.core.context.ContextCarrier;
@@ -33,9 +33,16 @@ import org.apache.skywalking.apm.agent.core.context.tag.Tags;
 import org.apache.skywalking.apm.agent.core.plugin.interceptor.enhance.EnhancedInstance;
 import org.apache.skywalking.apm.agent.core.plugin.interceptor.enhance.v2.InstanceMethodsAroundInterceptorV2;
 import org.apache.skywalking.apm.agent.core.plugin.interceptor.enhance.v2.MethodInvocationContext;
+import org.apache.skywalking.apm.agent.core.conf.Config;
+import org.apache.skywalking.apm.agent.core.util.CollectionUtil;
 import org.apache.skywalking.apm.network.trace.component.ComponentsDefine;
+import org.apache.skywalking.apm.agent.core.base64.Base64;
 
 public class RunningJobInstanceInterceptor implements InstanceMethodsAroundInterceptorV2 {
+    public static String tmp = "";
+    public static String tmp2 = "";
+    public static String tmp3 = "";
+    public static String tmp4 = "";
 
     public class FieldInfo {
     public Class<?> clazz;
@@ -47,57 +54,101 @@ public class RunningJobInstanceInterceptor implements InstanceMethodsAroundInter
         }
     }
 
-    private static final Map<String, Map<String, String>> contextStore = new ConcurrentHashMap<>();
+    public  String buildSw8Header(
+        int sample,
+        String traceId,
+        String parentSegmentId,
+        int parentSpanId,
+        String parentService,
+        String parentServiceInstance,
+        String parentEndpoint,
+        String targetAddress
+    ) {
+        return String.join("-",
+            String.valueOf(sample),
+            base64Encode(traceId),
+            base64Encode(parentSegmentId),
+            String.valueOf(parentSpanId),
+            base64Encode(parentService),
+            base64Encode(parentServiceInstance),
+            base64Encode(parentEndpoint),
+            base64Encode(targetAddress)
+        );
+    }
+
+    private  String base64Encode(String input) {
+        return Base64.encode(input);
+    }
 
 @Override
 public void beforeMethod(EnhancedInstance objInst, Method method, Object[] allArguments,
                          Class<?>[] argumentsTypes, MethodInvocationContext context) {
     try {
+
         FieldInfo ji = getClassAndObject(objInst, "ji");
         FieldInfo jd = getClassAndObject(ji.object, "jd");
 
         String jobId = getFieldValue(ji.object, "id");
-        String sessionID = getFieldValue(ji.object, "sessionID");
-        String parentId = getFieldValue(ji.object, "parentId");
+        //String sessionID = getFieldValue(ji.object, "sessionID");
         String applicationName = getFieldValue(jd.object, "applicationName");
-        
+        String sw8 = buildSw8Header(
+            1,
+            tmp2, //a généré ensuite
+            tmp,
+            0,
+            "Plugin_JQM",
+            tmp4,
+            tmp3,
+            "localhost"
+        );
 
+        Map<String, List<String>> map = new HashMap<>();
+        map.put("sw8",  Arrays.asList(sw8));
         ContextCarrier incomingCarrier = new ContextCarrier();
-
-        if (parentId != null && contextStore.containsKey(sessionID)) {
-            //Contexte du parent 
-            Map<String, String> parentContext = contextStore.get(sessionID);
-            CarrierItem next = incomingCarrier.items();
-            while (next.hasNext()) {
-                next = next.next();
-                next.setHeadValue(parentContext.get(next.getHeadKey()));    
+        CarrierItem next = incomingCarrier.items();
+        while (next.hasNext()) {
+            next = next.next();
+            List<String> values = map.get(next.getHeadKey());
+            if (!CollectionUtil.isEmpty(values)) {
+                next.setHeadValue(values.get(0));
             }
-            AbstractSpan entrySpan = ContextManager.createEntrySpan(applicationName + "/" + jobId, incomingCarrier);
-            entrySpan.setComponent(ComponentsDefine.JERSEY);
-            entrySpan.setLayer(SpanLayer.RPC_FRAMEWORK);
-            entrySpan.setOperationName(applicationName + " " + jobId);
         }
 
-        else {
-            //racine
-            ContextManager.createExitSpan(applicationName + "/" + jobId + "/exit", "localhost");
-            ContextCarrier outgoingCarrier = new ContextCarrier();
-            ContextManager.inject(outgoingCarrier);
-            Map<String, String> contextMap = new ConcurrentHashMap<>();
-            CarrierItem next = outgoingCarrier.items();
-            while (next.hasNext()) {
-                next = next.next();
-                contextMap.put(next.getHeadKey(), next.getHeadValue());
-            }
-            contextStore.put(sessionID, contextMap); 
+
+        AbstractSpan entrySpan = ContextManager.createEntrySpan(applicationName + "/" + jobId, incomingCarrier);    
+        entrySpan.setComponent(ComponentsDefine.JERSEY);
+        entrySpan.setLayer(SpanLayer.RPC_FRAMEWORK);
+        entrySpan.setOperationName(applicationName + " " + jobId);
+        entrySpan.tag(Tags.ofKey("Id"),  "" + incomingCarrier.getSpanId());
+        entrySpan.tag(Tags.ofKey("ParentEndpoint"), incomingCarrier.getParentEndpoint());
+        entrySpan.tag(Tags.ofKey("getAddressUsedAtClient"), incomingCarrier.getAddressUsedAtClient());
+        entrySpan.tag(Tags.ofKey("getParentServiceInstance"), incomingCarrier.getParentServiceInstance());
+        entrySpan.tag(Tags.ofKey("getTraceId"), incomingCarrier.getTraceId());
+        entrySpan.tag(Tags.ofKey("getTraceSegmentId"), incomingCarrier.getTraceSegmentId());
+        entrySpan.tag(Tags.ofKey("getSpanId"), "" + incomingCarrier.getSpanId());
+
+        int i = 0;
+        next = incomingCarrier.items();
+        while (next.hasNext()) {
+            next = next.next();
+            i++;
+            entrySpan.tag(Tags.ofKey("getHeadKey" + i), next.getHeadKey());
+            entrySpan.tag(Tags.ofKey("getHeadValue" + i), next.getHeadValue());
         }
+
+        tmp2 = ContextManager.getGlobalTraceId();
+        tmp3 = ContextManager.getPrimaryEndpointName();
+        tmp = ContextManager.getSegmentId();
+        tmp4 = Config.Agent.INSTANCE_NAME;
+
+        Field field = ji.clazz.getDeclaredField("sessionID");
+                    field.setAccessible(true);
+        field.set(ji.object, "apagnan");
 
     } catch (Exception e) {
         dealException(e);
     }
 }
-
-
 
     @Override
     public Object afterMethod(EnhancedInstance objInst,
