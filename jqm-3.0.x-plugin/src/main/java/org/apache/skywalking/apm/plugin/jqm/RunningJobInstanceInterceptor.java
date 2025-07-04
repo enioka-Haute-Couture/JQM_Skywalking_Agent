@@ -33,16 +33,10 @@ import org.apache.skywalking.apm.agent.core.context.tag.Tags;
 import org.apache.skywalking.apm.agent.core.plugin.interceptor.enhance.EnhancedInstance;
 import org.apache.skywalking.apm.agent.core.plugin.interceptor.enhance.v2.InstanceMethodsAroundInterceptorV2;
 import org.apache.skywalking.apm.agent.core.plugin.interceptor.enhance.v2.MethodInvocationContext;
-import org.apache.skywalking.apm.agent.core.conf.Config;
 import org.apache.skywalking.apm.agent.core.util.CollectionUtil;
 import org.apache.skywalking.apm.network.trace.component.ComponentsDefine;
-import org.apache.skywalking.apm.agent.core.base64.Base64;
 
 public class RunningJobInstanceInterceptor implements InstanceMethodsAroundInterceptorV2 {
-    public static String tmp = "";
-    public static String tmp2 = "";
-    public static String tmp3 = "";
-    public static String tmp4 = "";
 
     public class FieldInfo {
     public Class<?> clazz;
@@ -54,32 +48,6 @@ public class RunningJobInstanceInterceptor implements InstanceMethodsAroundInter
         }
     }
 
-    public  String buildSw8Header(
-        int sample,
-        String traceId,
-        String parentSegmentId,
-        int parentSpanId,
-        String parentService,
-        String parentServiceInstance,
-        String parentEndpoint,
-        String targetAddress
-    ) {
-        return String.join("-",
-            String.valueOf(sample),
-            base64Encode(traceId),
-            base64Encode(parentSegmentId),
-            String.valueOf(parentSpanId),
-            base64Encode(parentService),
-            base64Encode(parentServiceInstance),
-            base64Encode(parentEndpoint),
-            base64Encode(targetAddress)
-        );
-    }
-
-    private  String base64Encode(String input) {
-        return Base64.encode(input);
-    }
-
 @Override
 public void beforeMethod(EnhancedInstance objInst, Method method, Object[] allArguments,
                          Class<?>[] argumentsTypes, MethodInvocationContext context) {
@@ -89,21 +57,12 @@ public void beforeMethod(EnhancedInstance objInst, Method method, Object[] allAr
         FieldInfo jd = getClassAndObject(ji.object, "jd");
 
         String jobId = getFieldValue(ji.object, "id");
-        //String sessionID = getFieldValue(ji.object, "sessionID");
+        String tmpSw8 = getFieldValue(ji.object, "sessionID");
         String applicationName = getFieldValue(jd.object, "applicationName");
-        String sw8 = buildSw8Header(
-            1,
-            tmp2, //a généré ensuite
-            tmp,
-            0,
-            "Plugin_JQM",
-            tmp4,
-            tmp3,
-            "localhost"
-        );
-
+        //String sw8 = getFieldValue(ji.object, "context");
+        //System.out.println(sw8);
         Map<String, List<String>> map = new HashMap<>();
-        map.put("sw8",  Arrays.asList(sw8));
+        map.put("sw8",  Arrays.asList(tmpSw8));
         ContextCarrier incomingCarrier = new ContextCarrier();
         CarrierItem next = incomingCarrier.items();
         while (next.hasNext()) {
@@ -113,7 +72,6 @@ public void beforeMethod(EnhancedInstance objInst, Method method, Object[] allAr
                 next.setHeadValue(values.get(0));
             }
         }
-
 
         AbstractSpan entrySpan = ContextManager.createEntrySpan(applicationName + "/" + jobId, incomingCarrier);    
         entrySpan.setComponent(ComponentsDefine.JERSEY);
@@ -136,17 +94,8 @@ public void beforeMethod(EnhancedInstance objInst, Method method, Object[] allAr
             entrySpan.tag(Tags.ofKey("getHeadValue" + i), next.getHeadValue());
         }
 
-        tmp2 = ContextManager.getGlobalTraceId();
-        tmp3 = ContextManager.getPrimaryEndpointName();
-        tmp = ContextManager.getSegmentId();
-        tmp4 = Config.Agent.INSTANCE_NAME;
-
-        Field field = ji.clazz.getDeclaredField("sessionID");
-                    field.setAccessible(true);
-        field.set(ji.object, "apagnan");
-
     } catch (Exception e) {
-        dealException(e);
+         e.printStackTrace();
     }
 }
 
@@ -160,7 +109,6 @@ public void beforeMethod(EnhancedInstance objInst, Method method, Object[] allAr
         try {
             //get all the objects we need
             Class<?> runningJobInstanceClass = objInst.getClass();
-
             FieldInfo ji = getClassAndObject(objInst, "ji");
             FieldInfo jd = getClassAndObject(ji.object, "jd");
             FieldInfo queue = getClassAndObject(ji.object, "q");
@@ -209,7 +157,7 @@ public void beforeMethod(EnhancedInstance objInst, Method method, Object[] allAr
             }
 
         } catch (Exception e) {
-            dealException(e);
+            System.out.println(e);
         }
         ContextManager.stopSpan();
         return ret;
@@ -275,5 +223,4 @@ public void beforeMethod(EnhancedInstance objInst, Method method, Object[] allAr
         span.log(throwable);
         ContextManager.stopSpan(span);
     }
-
 }

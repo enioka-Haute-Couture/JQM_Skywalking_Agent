@@ -297,19 +297,13 @@ export const useJobInstanceAPI = () => {
 
     const launchJob = useCallback(
         async (jobLauchParameters: JobLaunchParameters) => {
-// Report collected data to `http:// + window.location.host + /browser/perfData` in default
             ClientMonitor.register({
             collector: `${window.location.origin}/api/sw`,
             service: 'Plugin_JQM',
             pagePath: '/client/ji',
             serviceVersion: 'v1.0.0',
+            traceTimeInterval: 3000,
             });
-            console.log("ClientMonitor registered");
-            ClientMonitor.setCustomTags([
-                { key: 'key1', value: 'value1' },
-                { key: 'key2', value: 'value2' },
-            ]);
-            console.log("ClientMonitor registered");
             return APIService.post(API_URL, jobLauchParameters)
                 .then(() => {
                     fetchJobInstances(
