@@ -16,7 +16,8 @@
  *
  */
 
- package org.apache.skywalking.apm.plugin.jqm;
+package org.apache.skywalking.apm.plugin.jqm;
+
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.util.Arrays;
@@ -36,85 +37,89 @@ import org.apache.skywalking.apm.agent.core.plugin.interceptor.enhance.v2.Method
 import org.apache.skywalking.apm.agent.core.util.CollectionUtil;
 import org.apache.skywalking.apm.network.trace.component.ComponentsDefine;
 
-public class RunningJobInstanceInterceptor implements InstanceMethodsAroundInterceptorV2 {
+public class RunningJobInstanceInterceptor implements InstanceMethodsAroundInterceptorV2
+{
 
-    public class FieldInfo {
-    public Class<?> clazz;
-    public Object object;
+    public class FieldInfo
+    {
+        public Class<?> clazz;
+        public Object object;
 
-        public FieldInfo(Class<?> clazz, Object object) {
-        this.clazz = clazz;
-        this.object = object;
+        public FieldInfo(Class<?> clazz, Object object)
+        {
+            this.clazz = clazz;
+            this.object = object;
         }
     }
-
-@Override
-public void beforeMethod(EnhancedInstance objInst, Method method, Object[] allArguments,
-                         Class<?>[] argumentsTypes, MethodInvocationContext context) {
-    try {
-
-        FieldInfo ji = getClassAndObject(objInst, "ji");
-        FieldInfo jd = getClassAndObject(ji.object, "jd");
-
-        String jobId = getFieldValue(ji.object, "id");
-        String tmpSw8 = getFieldValue(ji.object, "sessionID");
-        String applicationName = getFieldValue(jd.object, "applicationName");
-        //String sw8 = getFieldValue(ji.object, "context");
-        //System.out.println(sw8);
-        Map<String, List<String>> map = new HashMap<>();
-        map.put("sw8",  Arrays.asList(tmpSw8));
-        ContextCarrier incomingCarrier = new ContextCarrier();
-        CarrierItem next = incomingCarrier.items();
-        while (next.hasNext()) {
-            next = next.next();
-            List<String> values = map.get(next.getHeadKey());
-            if (!CollectionUtil.isEmpty(values)) {
-                next.setHeadValue(values.get(0));
-            }
-        }
-
-        AbstractSpan entrySpan = ContextManager.createEntrySpan(applicationName + "/" + jobId, incomingCarrier);    
-        entrySpan.setComponent(ComponentsDefine.JERSEY);
-        entrySpan.setLayer(SpanLayer.RPC_FRAMEWORK);
-        entrySpan.setOperationName(applicationName + " " + jobId);
-        entrySpan.tag(Tags.ofKey("Id"),  "" + incomingCarrier.getSpanId());
-        entrySpan.tag(Tags.ofKey("ParentEndpoint"), incomingCarrier.getParentEndpoint());
-        entrySpan.tag(Tags.ofKey("getAddressUsedAtClient"), incomingCarrier.getAddressUsedAtClient());
-        entrySpan.tag(Tags.ofKey("getParentServiceInstance"), incomingCarrier.getParentServiceInstance());
-        entrySpan.tag(Tags.ofKey("getTraceId"), incomingCarrier.getTraceId());
-        entrySpan.tag(Tags.ofKey("getTraceSegmentId"), incomingCarrier.getTraceSegmentId());
-        entrySpan.tag(Tags.ofKey("getSpanId"), "" + incomingCarrier.getSpanId());
-
-        int i = 0;
-        next = incomingCarrier.items();
-        while (next.hasNext()) {
-            next = next.next();
-            i++;
-            entrySpan.tag(Tags.ofKey("getHeadKey" + i), next.getHeadKey());
-            entrySpan.tag(Tags.ofKey("getHeadValue" + i), next.getHeadValue());
-        }
-
-    } catch (Exception e) {
-         e.printStackTrace();
-    }
-}
 
     @Override
-    public Object afterMethod(EnhancedInstance objInst,
-                              Method method,
-                              Object[] allArguments,
-                              Class<?>[] argumentsTypes,
-                              Object ret,
-                              MethodInvocationContext context) {
-        try {
-            //get all the objects we need
+    public void beforeMethod(EnhancedInstance objInst, Method method, Object[] allArguments, Class<?>[] argumentsTypes,
+            MethodInvocationContext context)
+    {
+        try
+        {
+
+            FieldInfo ji = getClassAndObject(objInst, "ji");
+            FieldInfo jd = getClassAndObject(ji.object, "jd");
+
+            String jobId = getFieldValue(ji.object, "id");
+            String applicationName = getFieldValue(jd.object, "applicationName");
+            String sw8 = getFieldValue(ji.object, "contextCarrier");
+            Map<String, List<String>> map = new HashMap<>();
+            map.put("sw8", Arrays.asList(sw8));
+            ContextCarrier incomingCarrier = new ContextCarrier();
+            CarrierItem next = incomingCarrier.items();
+            while (next.hasNext())
+            {
+                next = next.next();
+                List<String> values = map.get(next.getHeadKey());
+                if (!CollectionUtil.isEmpty(values))
+                {
+                    next.setHeadValue(values.get(0));
+                }
+            }
+
+            AbstractSpan entrySpan = ContextManager.createEntrySpan(applicationName + "/" + jobId, incomingCarrier);
+            entrySpan.setComponent(ComponentsDefine.JERSEY);
+            entrySpan.setLayer(SpanLayer.RPC_FRAMEWORK);
+            entrySpan.setOperationName(applicationName + " " + jobId);
+            entrySpan.tag(Tags.ofKey("Id"), "" + incomingCarrier.getSpanId());
+            entrySpan.tag(Tags.ofKey("ParentEndpoint"), incomingCarrier.getParentEndpoint());
+            entrySpan.tag(Tags.ofKey("getAddressUsedAtClient"), incomingCarrier.getAddressUsedAtClient());
+            entrySpan.tag(Tags.ofKey("getParentServiceInstance"), incomingCarrier.getParentServiceInstance());
+            entrySpan.tag(Tags.ofKey("getTraceId"), incomingCarrier.getTraceId());
+            entrySpan.tag(Tags.ofKey("getTraceSegmentId"), incomingCarrier.getTraceSegmentId());
+            entrySpan.tag(Tags.ofKey("getSpanId"), "" + incomingCarrier.getSpanId());
+
+            int i = 0;
+            next = incomingCarrier.items();
+            while (next.hasNext())
+            {
+                next = next.next();
+                i++;
+                entrySpan.tag(Tags.ofKey("getHeadKey" + i), next.getHeadKey());
+                entrySpan.tag(Tags.ofKey("getHeadValue" + i), next.getHeadValue());
+            }
+
+        }
+        catch (Exception e)
+        {
+            e.printStackTrace();
+        }
+    }
+
+    @Override
+    public Object afterMethod(EnhancedInstance objInst, Method method, Object[] allArguments, Class<?>[] argumentsTypes, Object ret,
+            MethodInvocationContext context)
+    {
+        try
+        {
             Class<?> runningJobInstanceClass = objInst.getClass();
             FieldInfo ji = getClassAndObject(objInst, "ji");
             FieldInfo jd = getClassAndObject(ji.object, "jd");
             FieldInfo queue = getClassAndObject(ji.object, "q");
             FieldInfo node = getClassAndObject(ji.object, "q");
 
-            //case for a enum
             Field resultStatusField = runningJobInstanceClass.getDeclaredField("resultStatus");
             resultStatusField.setAccessible(true);
             Object resultStatusObject = resultStatusField.get(objInst);
@@ -123,7 +128,6 @@ public void beforeMethod(EnhancedInstance objInst, Method method, Object[] allAr
             Field applicationName = jd.clazz.getDeclaredField("applicationName");
             applicationName.setAccessible(true);
 
-            //add Tags
             AbstractSpan span = ContextManager.activeSpan();
             span.tag(Tags.ofKey("Software"), getFieldValue(ji.object, "instanceApplication"));
             span.tag(Tags.ofKey("Module"), getFieldValue(ji.object, "instanceModule"));
@@ -152,11 +156,14 @@ public void beforeMethod(EnhancedInstance objInst, Method method, Object[] allAr
 
             HashMap<String, String> param = getFieldHashMap(ji.object, "prmCache");
             Integer tmp = 1;
-            for (String i : param.keySet()) {
-            span.tag(Tags.ofKey("Param" + tmp++), "name: " + i + " value: " + param.get(i));
+            for (String i : param.keySet())
+            {
+                span.tag(Tags.ofKey("Param" + tmp++), "name: " + i + " value: " + param.get(i));
             }
 
-        } catch (Exception e) {
+        }
+        catch (Exception e)
+        {
             System.out.println(e);
         }
         ContextManager.stopSpan();
@@ -164,47 +171,55 @@ public void beforeMethod(EnhancedInstance objInst, Method method, Object[] allAr
     }
 
     @Override
-    public void handleMethodException(EnhancedInstance objInst,
-                                      Method method,
-                                      Object[] allArguments,
-                                      Class<?>[] argumentsTypes,
-                                      Throwable t,
-                                      MethodInvocationContext context) {
+    public void handleMethodException(EnhancedInstance objInst, Method method, Object[] allArguments, Class<?>[] argumentsTypes,
+            Throwable t, MethodInvocationContext context)
+    {
         dealException(t);
     }
 
-    private String getFieldValue(Object fieldObject,
-                                String fieldName) {
-                try {
-                    Field field = fieldObject.getClass().getDeclaredField(fieldName);
-                    field.setAccessible(true);
-                    return String.valueOf(field.get(fieldObject));
-                } catch (Exception e) {
-                    dealException(e);
-                }
-                return null;
-        }
-
-    @SuppressWarnings("unchecked")
-    private HashMap<String, String> getFieldHashMap(Object fieldObject, String fieldName) {
-        if (fieldObject == null || fieldName == null) {
-            return null;
-        }
-        try {
+    private String getFieldValue(Object fieldObject, String fieldName)
+    {
+        try
+        {
             Field field = fieldObject.getClass().getDeclaredField(fieldName);
             field.setAccessible(true);
-            Object value = field.get(fieldObject);
-            if (value instanceof HashMap<?, ?>) {
-                return (HashMap<String, String>) value;
-            }
-        } catch (Exception e) {
+            return String.valueOf(field.get(fieldObject));
+        }
+        catch (Exception e)
+        {
             dealException(e);
         }
         return null;
     }
 
-    private FieldInfo getClassAndObject(Object parent, String fieldName) {
-        try {
+    @SuppressWarnings("unchecked")
+    private HashMap<String, String> getFieldHashMap(Object fieldObject, String fieldName)
+    {
+        if (fieldObject == null || fieldName == null)
+        {
+            return null;
+        }
+        try
+        {
+            Field field = fieldObject.getClass().getDeclaredField(fieldName);
+            field.setAccessible(true);
+            Object value = field.get(fieldObject);
+            if (value instanceof HashMap<?, ?>)
+            {
+                return (HashMap<String, String>) value;
+            }
+        }
+        catch (Exception e)
+        {
+            dealException(e);
+        }
+        return null;
+    }
+
+    private FieldInfo getClassAndObject(Object parent, String fieldName)
+    {
+        try
+        {
             Field field = parent.getClass().getDeclaredField(fieldName);
             field.setAccessible(true);
 
@@ -212,13 +227,16 @@ public void beforeMethod(EnhancedInstance objInst, Method method, Object[] allAr
             Class<?> classInst = (object != null) ? object.getClass() : null;
 
             return new FieldInfo(classInst, object);
-        } catch (Exception e) {
+        }
+        catch (Exception e)
+        {
             dealException(e);
             return null;
         }
     }
 
-    private void dealException(Throwable throwable) {
+    private void dealException(Throwable throwable)
+    {
         AbstractSpan span = ContextManager.activeSpan();
         span.log(throwable);
         ContextManager.stopSpan(span);
