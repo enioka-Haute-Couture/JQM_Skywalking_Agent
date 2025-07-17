@@ -64,7 +64,8 @@ public class RunningJobInstanceInterceptor implements InstanceMethodsAroundInter
 
             String jobId = getFieldValue(ji.object, "id");
             String applicationName = getFieldValue(jd.object, "applicationName");
-            String sw8 = getFieldValue(ji.object, "contextCarrier");
+            String sw8 = getFieldValue(ji.object, "traceId");
+
             Map<String, List<String>> map = new HashMap<>();
             map.put("sw8", Arrays.asList(sw8));
             ContextCarrier incomingCarrier = new ContextCarrier();
@@ -83,24 +84,6 @@ public class RunningJobInstanceInterceptor implements InstanceMethodsAroundInter
             entrySpan.setComponent(ComponentsDefine.JERSEY);
             entrySpan.setLayer(SpanLayer.RPC_FRAMEWORK);
             entrySpan.setOperationName(applicationName + " " + jobId);
-            entrySpan.tag(Tags.ofKey("Id"), "" + incomingCarrier.getSpanId());
-            entrySpan.tag(Tags.ofKey("ParentEndpoint"), incomingCarrier.getParentEndpoint());
-            entrySpan.tag(Tags.ofKey("getAddressUsedAtClient"), incomingCarrier.getAddressUsedAtClient());
-            entrySpan.tag(Tags.ofKey("getParentServiceInstance"), incomingCarrier.getParentServiceInstance());
-            entrySpan.tag(Tags.ofKey("getTraceId"), incomingCarrier.getTraceId());
-            entrySpan.tag(Tags.ofKey("getTraceSegmentId"), incomingCarrier.getTraceSegmentId());
-            entrySpan.tag(Tags.ofKey("getSpanId"), "" + incomingCarrier.getSpanId());
-
-            int i = 0;
-            next = incomingCarrier.items();
-            while (next.hasNext())
-            {
-                next = next.next();
-                i++;
-                entrySpan.tag(Tags.ofKey("getHeadKey" + i), next.getHeadKey());
-                entrySpan.tag(Tags.ofKey("getHeadValue" + i), next.getHeadValue());
-            }
-
         }
         catch (Exception e)
         {
@@ -117,42 +100,30 @@ public class RunningJobInstanceInterceptor implements InstanceMethodsAroundInter
             Class<?> runningJobInstanceClass = objInst.getClass();
             FieldInfo ji = getClassAndObject(objInst, "ji");
             FieldInfo jd = getClassAndObject(ji.object, "jd");
-            FieldInfo queue = getClassAndObject(ji.object, "q");
             FieldInfo node = getClassAndObject(ji.object, "q");
 
             Field resultStatusField = runningJobInstanceClass.getDeclaredField("resultStatus");
             resultStatusField.setAccessible(true);
             Object resultStatusObject = resultStatusField.get(objInst);
             String queueStatus = resultStatusObject != null ? resultStatusObject.toString() : null;
-
-            Field applicationName = jd.clazz.getDeclaredField("applicationName");
-            applicationName.setAccessible(true);
-
+            
             AbstractSpan span = ContextManager.activeSpan();
-            span.tag(Tags.ofKey("Software"), getFieldValue(ji.object, "instanceApplication"));
-            span.tag(Tags.ofKey("Module"), getFieldValue(ji.object, "instanceModule"));
-            span.tag(Tags.ofKey("Application"), getFieldValue(jd.object, "applicationName"));
-            span.tag(Tags.ofKey("Job id"), getFieldValue(ji.object, "id"));
-            span.tag(Tags.ofKey("Priority"), getFieldValue(ji.object, "priority"));
-            span.tag(Tags.ofKey("Parent"), getFieldValue(ji.object, "parentId"));
-            span.tag(Tags.ofKey("Session id"), getFieldValue(ji.object, "sessionID"));
+
+            List<String> key = List.of("Software", "Module", "Job id", "Priority", "Parent", "Session id", "Progress", "User", "User Email", "Keyword 1", "Keyword 2", "Keyword 3");
+            List<String> fieldName = List.of("instanceApplication", "instanceModule", "id", "priority", "parentId", "sessionID", "progress", "userName", "email", "instanceKeyword1", "instanceKeyword2", "instanceKeyword3");
+
+            for (int i = 0; i < key.size(); i++) {
+                span.tag(Tags.ofKey(key.get(i)), getFieldValue(ji.object, fieldName.get(i)));
+            }
+
+            key = List.of("description", "Java Class Name", "Application", "Path Type", "Queue name", "Queue id", "Max Time Running", "JavaOpts", "Class Loader");
+            fieldName = List.of("description", "javaClassName", "applicationName", "pathType", "jarPath", "queue_id", "maxTimeRunning", "javaOpts", "classLoader");
+
+            for (int i = 0; i < key.size(); i++) {
+                span.tag(Tags.ofKey(key.get(i)), getFieldValue(jd.object, fieldName.get(i)));
+            }
             span.tag(Tags.ofKey("Queue"), queueStatus);
-            span.tag(Tags.ofKey("Progress"), getFieldValue(ji.object, "progress"));
-            span.tag(Tags.ofKey("User"), getFieldValue(ji.object, "userName"));
-            span.tag(Tags.ofKey("User Email"), getFieldValue(ji.object, "email"));
-            span.tag(Tags.ofKey("Keyword 1"), getFieldValue(ji.object, "instanceKeyword1"));
-            span.tag(Tags.ofKey("Keyword 2"), getFieldValue(ji.object, "instanceKeyword2"));
-            span.tag(Tags.ofKey("Keyword 3"), getFieldValue(ji.object, "instanceKeyword3"));
             span.tag(Tags.ofKey("Node"), getFieldValue(node.object, "name"));
-            span.tag(Tags.ofKey("Queue name"), getFieldValue(queue.object, "name"));
-            span.tag(Tags.ofKey("description"), getFieldValue(jd.object, "description"));
-            span.tag(Tags.ofKey("javaClassName"), getFieldValue(jd.object, "javaClassName"));
-            span.tag(Tags.ofKey("pathType"), getFieldValue(jd.object, "pathType"));
-            span.tag(Tags.ofKey("Queue name"), getFieldValue(jd.object, "jarPath"));
-            span.tag(Tags.ofKey("Queue id"), getFieldValue(jd.object, "queue_id"));
-            span.tag(Tags.ofKey("maxTimeRunning"), getFieldValue(jd.object, "maxTimeRunning"));
-            span.tag(Tags.ofKey("javaOpts"), getFieldValue(jd.object, "javaOpts"));
-            span.tag(Tags.ofKey("classLoader"), getFieldValue(jd.object, "classLoader"));
 
             HashMap<String, String> param = getFieldHashMap(ji.object, "prmCache");
             Integer tmp = 1;
@@ -164,7 +135,7 @@ public class RunningJobInstanceInterceptor implements InstanceMethodsAroundInter
         }
         catch (Exception e)
         {
-            System.out.println(e);
+            dealException(e, true);
         }
         ContextManager.stopSpan();
         return ret;
@@ -174,7 +145,7 @@ public class RunningJobInstanceInterceptor implements InstanceMethodsAroundInter
     public void handleMethodException(EnhancedInstance objInst, Method method, Object[] allArguments, Class<?>[] argumentsTypes,
             Throwable t, MethodInvocationContext context)
     {
-        dealException(t);
+        dealException(t, true);
     }
 
     private String getFieldValue(Object fieldObject, String fieldName)
@@ -187,7 +158,7 @@ public class RunningJobInstanceInterceptor implements InstanceMethodsAroundInter
         }
         catch (Exception e)
         {
-            dealException(e);
+            dealException(e, false);
         }
         return null;
     }
@@ -211,7 +182,7 @@ public class RunningJobInstanceInterceptor implements InstanceMethodsAroundInter
         }
         catch (Exception e)
         {
-            dealException(e);
+            dealException(e, true);
         }
         return null;
     }
@@ -230,15 +201,17 @@ public class RunningJobInstanceInterceptor implements InstanceMethodsAroundInter
         }
         catch (Exception e)
         {
-            dealException(e);
+            dealException(e, true);
             return null;
         }
     }
 
-    private void dealException(Throwable throwable)
+    private void dealException(Throwable throwable, Boolean stop)
     {
         AbstractSpan span = ContextManager.activeSpan();
         span.log(throwable);
-        ContextManager.stopSpan(span);
+        if (stop) {
+            ContextManager.stopSpan(span);
+        }
     }
 }
