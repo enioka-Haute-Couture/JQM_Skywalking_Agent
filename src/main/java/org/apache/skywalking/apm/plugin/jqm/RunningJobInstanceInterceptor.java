@@ -109,8 +109,8 @@ public class RunningJobInstanceInterceptor implements InstanceMethodsAroundInter
             
             AbstractSpan span = ContextManager.activeSpan();
 
-            List<String> key = List.of("Software", "Module", "Job id", "Priority", "Parent", "Session id", "Progress", "User", "User Email", "Keyword 1", "Keyword 2", "Keyword 3");
-            List<String> fieldName = List.of("instanceApplication", "instanceModule", "id", "priority", "parentId", "sessionID", "progress", "userName", "email", "instanceKeyword1", "instanceKeyword2", "instanceKeyword3");
+            List<String> key = List.of("Software", "Module", "Job id", "Priority", "Parent", "Session id", "Progress", "User", "User Email", "Keyword 1", "Keyword 2", "Keyword 3", "traceId");
+            List<String> fieldName = List.of("instanceApplication", "instanceModule", "id", "priority", "parentId", "sessionID", "progress", "userName", "email", "instanceKeyword1", "instanceKeyword2", "instanceKeyword3", "traceId");
 
             for (int i = 0; i < key.size(); i++) {
                 span.tag(Tags.ofKey(key.get(i)), getFieldValue(ji.object, fieldName.get(i)));
