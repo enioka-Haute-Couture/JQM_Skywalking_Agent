@@ -1,11 +1,24 @@
 # JQM Skywalking plugin
 
-This module provides a plugin for [JQM](https://github.com/enioka-Haute-Couture/jqm) to monitor jobs with Apache SkyWalking.
+This module provides a plugin for [JQM](https://github.com/enioka-Haute-Couture/jqm) to monitor jobs with Apache SkyWalking, allowing to propagate distributed traces from client applications creating job requests to jobs.
 
----
+This is designed as a plugin of the official Skywalking Java agent, which can be obtained [here](https://dlcdn.apache.org/skywalking/java-agent) or on their Github.
 
 ## Usage
----
+
+The Skywalking agent must be copied to a directory with sufficient permissions for the user running the JQM service. This path is called `SW_ROOT` later.
+
+Download the JQM plugin from Github: [Latest release](./releases/latest). Copy the jar file into the `skywaling-agent-root/plugins` folder.
+
+Finaly, for JQM to use the Skywalking Java agent with the plugin, launch JQM with the following JVM arguments:
+
+```bash
+export SW_AGENT_NAME="JQM-Node"
+export JAVA_OPTS=-javaagent:<path/to/skywalking-agent.jar>
+export SW_AGENT_COLLECTOR_BACKEND_SERVICES="localhost:11800" # only if you are not using the default port
+```
+
+## Developing and testing locally
 
 ### Install SkyWalking Docker
 
@@ -19,15 +32,4 @@ The SkyWalking web interface should now be accessible at: ``http://localhost:808
 
 ### Install SkyWalking JQM Agent
 
-Simply compile using `mvn clean package` to generate the plugin jar (inside the /target folder).
-
-
-From [this URL](https://dlcdn.apache.org/skywalking/java-agent), go to the latest version available and download the `apache-skywalking-java-agent-<version>.tgz` file.
-Decompress it, then go into skywaling-agent/plugins, and copy the generated jar file into this folder.
-
-Finaly, for JQM to use the plugin, launch it with the following JVM argument:
-```bash
-export SW_AGENT_NAME="JQM-Node"
-export JAVA_OPTS=-javaagent:<path/to/skywalking-agent.jar>
-export SW_AGENT_COLLECTOR_BACKEND_SERVICES="localhost:11800" # only if you are not using the default port
-```
+Simply compile using `mvn clean package` to generate the plugin jar (inside the /target folder). The copy it into a SW agent plugins directory.
