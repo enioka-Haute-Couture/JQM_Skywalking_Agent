@@ -30,7 +30,7 @@ jobs:
         id: jar
         run: |
           JAR_FILE=$(find target -name "jqm-plugin-*.jar" -not -name "*-sources.jar" | head -n 1)
-          RENAMED_JAR="target/jqm-server-${{ github.ref_name }}.jar"
+          RENAMED_JAR="target/jqm-server-${{ github.ref_name }}-plugin.jar"
           mv "$JAR_FILE" "$RENAMED_JAR"
           echo "JAR_PATH=$RENAMED_JAR" >> $GITHUB_OUTPUT
       

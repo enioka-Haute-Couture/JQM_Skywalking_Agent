@@ -8,13 +8,13 @@ This is designed as a plugin of the official Skywalking Java agent, which can be
 
 The Skywalking agent must be copied to a directory with sufficient permissions for the user running the JQM service. This path is called `SW_ROOT` later.
 
-Download the JQM plugin from Github: [Latest release](./releases/latest). Copy the jar file into the `skywaling-agent-root/plugins` folder.
+Download the JQM plugin from Github: [Latest release](./releases/latest). Copy the jar file into the `SW_ROOT/plugins` folder.
 
 Finaly, for JQM to use the Skywalking Java agent with the plugin, launch JQM with the following JVM arguments:
 
 ```bash
 export SW_AGENT_NAME="JQM-Node"
-export JAVA_OPTS=-javaagent:<path/to/skywalking-agent.jar>
+export JAVA_OPTS=-javaagent:SW_ROOT/skywalking-agent.jar
 export SW_AGENT_COLLECTOR_BACKEND_SERVICES="localhost:11800" # only if you are not using the default port
 ```
 
