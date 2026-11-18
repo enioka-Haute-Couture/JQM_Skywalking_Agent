@@ -26,14 +26,6 @@ jobs:
       - name: Build with Maven
         run: mvn clean package -DskipTests
       
-      - name: Rename JAR file
-        id: jar
-        run: |
-          JAR_FILE=$(find target -name "jqm-plugin-*.jar" -not -name "*-sources.jar" | head -n 1)
-          RENAMED_JAR="target/jqm-server-${{ github.ref_name }}-plugin.jar"
-          mv "$JAR_FILE" "$RENAMED_JAR"
-          echo "JAR_PATH=$RENAMED_JAR" >> $GITHUB_OUTPUT
-      
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v1
         with:
@@ -41,7 +33,8 @@ jobs:
           name: Release ${{ github.ref_name }}
           draft: false
           prerelease: false
-          files: ${{ steps.jar.outputs.JAR_PATH }}
+          files: target/jqm-plugin-skywalking-${{ github.ref_name }}.jar
+          fail_on_unmatched_files: true
           generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
